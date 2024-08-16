@@ -1,14 +1,18 @@
 import http.server
 import urllib.parse
 import mimetypes
+import logging
 from pathlib import Path
+import json
 from http.server import HTTPServer,BaseHTTPRequestHandler
+from jinja2 import Environment, FileSystemLoader
 
 BASE_DIR = Path() #це маршрут
+JIN = Environment(loader=FileSystemLoader(''))
 
 
 class Operator(BaseHTTPRequestHandler):
-    #функція для обробки гет запросів для відправки статичних файлів
+    #функція для обробки гет запросів 
     def do_GET(self):
         route = urllib.parse.urlparse(self.path)
         match route.path:
@@ -24,7 +28,23 @@ class Operator(BaseHTTPRequestHandler):
                     self.send_html('error.html', 404)
 
     def do_POST(self):
-        pass
+        size = self.headers.get('Content-Length')
+        data = self.rfile.read(int(size))
+        urllib.parse.data = urllib.parse.unquote_plus(data.decode())
+
+        try:
+            parse_deict = {key: value for key,value in [el.split('=')for el in urllib.parse.data.split('&')]}
+            print(parse_deict)
+            with open('data.json', 'w') as file:
+                json.dump(parse_deict, file, ensure_ascii=False,indent=4)
+        except ValueError as err:
+            logging.error(err)
+        except OSError as err:
+            logging.error(err)
+
+        self.send_response(302) 
+        self.send_header('Location', '/')
+        self.end_headers()
 
     #функція відправки статичних файлів
     def send_static(self, filename, status_code=200):
@@ -46,6 +66,23 @@ class Operator(BaseHTTPRequestHandler):
         with open(filename, 'rb',) as file:
             self.wfile.write(file.read())
 
+
+    """
+    це код з відео він не потрібен в цьому дз
+    але я хочу щоб він був тут!!!!!!!!!!!!!!!
+
+    def render_templates(self,filename, status_code=200):
+        self.send_response(status_code)
+        self.send_header('Content-type', 'text/html')
+        self.end_headers()
+
+        with open('storage/data.json', 'r', encoding="utf8") as file:
+            data = json.load(file)
+
+        template = JIN.get_template(filename)
+        html = template.render(blog=data)
+        self.wfile.write(html.encode())
+    """
 
 #функція запуску серверу
 def run_server():
