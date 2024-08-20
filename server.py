@@ -2,17 +2,18 @@ import http.server
 import urllib.parse
 import mimetypes
 import logging
-from pathlib import Path
+import threading
+import socket
 import json
-from http.server import HTTPServer,BaseHTTPRequestHandler
+import datetime
+from pathlib import Path
+from http.server import HTTPServer, BaseHTTPRequestHandler
 from jinja2 import Environment, FileSystemLoader
 
-BASE_DIR = Path() #це маршрут
+BASE_DIR = Path(__file__).parent
 JIN = Environment(loader=FileSystemLoader(''))
 
-
 class Operator(BaseHTTPRequestHandler):
-    #функція для обробки гет запросів 
     def do_GET(self):
         route = urllib.parse.urlparse(self.path)
         match route.path:
@@ -30,23 +31,25 @@ class Operator(BaseHTTPRequestHandler):
     def do_POST(self):
         size = self.headers.get('Content-Length')
         data = self.rfile.read(int(size))
-        urllib.parse.data = urllib.parse.unquote_plus(data.decode())
+        parsed_data = urllib.parse.unquote_plus(data.decode())
 
         try:
-            parse_deict = {key: value for key,value in [el.split('=')for el in urllib.parse.data.split('&')]}
-            print(parse_deict)
-            with open('data.json', 'w') as file:
-                json.dump(parse_deict, file, ensure_ascii=False,indent=4)
+            data_dict = {key: value for key, value in [el.split('=') for el in parsed_data.split('&')]}
+            print(data_dict)
+
+            # Відправка даних на Socket сервер
+            sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+            sock.sendto(json.dumps(data_dict).encode(), ("localhost", 5000))
+            sock.close()
         except ValueError as err:
             logging.error(err)
         except OSError as err:
             logging.error(err)
 
-        self.send_response(302) 
+        self.send_response(302)
         self.send_header('Location', '/')
         self.end_headers()
 
-    #функція відправки статичних файлів
     def send_static(self, filename, status_code=200):
         self.send_response(status_code)
         mime_type, *_ = mimetypes.guess_type(filename)
@@ -55,45 +58,48 @@ class Operator(BaseHTTPRequestHandler):
         else:
             self.send_header('Content-type', 'text/plain')
         self.end_headers()
-        with open(filename, 'rb',) as file:
+        with open(filename, 'rb') as file:
             self.wfile.write(file.read())
 
-    #функція відправки html
-    def send_html(self,filename, status_code=200):
+    def send_html(self, filename, status_code=200):
         self.send_response(status_code)
         self.send_header('Content-type', 'text/html')
         self.end_headers()
-        with open(filename, 'rb',) as file:
+        with open(filename, 'rb') as file:
             self.wfile.write(file.read())
 
-
-    """
-    це код з відео він не потрібен в цьому дз
-    але я хочу щоб він був тут!!!!!!!!!!!!!!!
-
-    def render_templates(self,filename, status_code=200):
-        self.send_response(status_code)
-        self.send_header('Content-type', 'text/html')
-        self.end_headers()
-
-        with open('storage/data.json', 'r', encoding="utf8") as file:
-            data = json.load(file)
-
-        template = JIN.get_template(filename)
-        html = template.render(blog=data)
-        self.wfile.write(html.encode())
-    """
-
-#функція запуску серверу
-def run_server():
-    adress = ('localhost', 3000)
-    http.server = HTTPServer(adress, Operator)
+def run_http_server():
+    address = ('localhost', 3000)
+    http_server = HTTPServer(address, Operator)
     try:
-        http.server.serve_forever()
+        http_server.serve_forever()
     except KeyboardInterrupt:
-        http.server.shutdown()
+        http_server.shutdown()
 
+def run_socket_server():
+    sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+    sock.bind(("localhost", 5000))
 
+    if not BASE_DIR.joinpath('storage').exists():
+        BASE_DIR.joinpath('storage').mkdir()
+
+    while True:
+        data, addr = sock.recvfrom(1024)
+        message = json.loads(data.decode())
+
+        timestamp = datetime.datetime.now().isoformat()
+        data_to_store = {timestamp: message}
+
+        if BASE_DIR.joinpath('storage/data.json').exists():
+            with open(BASE_DIR.joinpath('storage/data.json'), 'r', encoding="utf-8") as f:
+                existing_data = json.load(f)
+            existing_data.update(data_to_store)
+        else:
+            existing_data = data_to_store
+
+        with open(BASE_DIR.joinpath('storage/data.json'), 'w', encoding="utf-8") as f:
+            json.dump(existing_data, f, ensure_ascii=False, indent=4)
 
 if __name__ == '__main__':
-    run_server()
+    threading.Thread(target=run_http_server).start()
+    threading.Thread(target=run_socket_server).start()
